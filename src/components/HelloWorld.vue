@@ -21,14 +21,23 @@
       </form>
     </div>
     <div>
-      <h2>Number of participants: {{numberOfParticipants}}</h2>
+      <h2>Number of assessments: {{numberOfParticipants}}</h2>
       {{query}}
     </div>
+    <h2>variable counts ({{variableIds}})</h2>
+    <table>
+      <tr><th></th><th v-for="round in rounds" :key="round">{{round}}</th></tr>
+      <tr v-for="variable in countsPerVariable" :key="variable.name">
+        <th>{{variable.name}}</th>
+        <td v-for="round in rounds" :key="round">{{variable.countsPerRound[round]}}</td>
+      </tr>
+    </table>
   </div>
 </template>
 
 <script>
 const participant_groups = 'lifelines_aaaac2sufodaknv2bzvip3qaai'
+const variabele = 'lifelines_aaaac2suggtn2nv2bzvip3qaaq'
 
 export default {
   name: 'HelloWorld',
@@ -50,7 +59,11 @@ export default {
       dagx: false,
       myst: false,
       ugli: false,
-      numberOfParticipants: 0
+      numberOfParticipants: 0,
+      variableIds: [10393, 1],
+      groupIds: [],
+      countsPerVariable: [],
+      rounds: []
     }
   },
   computed: {
@@ -113,6 +126,45 @@ export default {
       fetch(`http://localhost:8080/api/v2/${participant_groups}?molgenis-token=test${qParam}&num=10000`)
         .then(it => it.json())
         .then(it => this.numberOfParticipants = it.items.map(it => it.count).reduce((sum, item) => item + sum, 0))
+    },
+    async fetchVariableGroups () {
+      const response = await fetch(`http://localhost:8080/api/v2/${variabele}?q=variabele_id=in=(${this.variableIds.join(',')})&attrs=groups,name&molgenis-token=test`)
+      const variableJson = await response.json()
+      const variables = variableJson.items.map(variable => ({name: variable.name, groupIds: variable.groups.map(group => group.variable_group_id)}))
+      const allGroupIds = variables.flatMap(variable => variable.groupIds)
+
+      this.groupIds = allGroupIds;
+      
+      const participantsResponse = await fetch(`http://localhost:8080/api/v2/${participant_groups}?molgenis-token=test&q=variable_group_id=in=(${allGroupIds.join(',')})&num=10000&attrs=~id,count,variable_group_id(~id,assessment_id(abbreviation))`)
+      const assessments = await participantsResponse.json()
+      const counts = assessments.items.map(it => ({
+          count: it.count, 
+          group: it.variable_group_id.variable_group_id, 
+          collectionRound: it.variable_group_id.assessment_id.abbreviation
+        }))
+
+      this.countsPerVariable = variables.map(variable => {
+        const countsForThisVariable = counts.filter(count => variable.groupIds.includes(count.group))
+
+        const countsPerRoundForThisVariable = countsForThisVariable.reduce((accum, item) => {
+          if(!accum[item.collectionRound]) {
+            accum[item.collectionRound] = 0
+          }
+          accum[item.collectionRound] += item.count
+          return accum
+        }, {})
+
+        return {
+          name: variable.name,
+          countsPerRound: countsPerRoundForThisVariable
+        }
+      })
+      this.rounds = counts.reduce((accum, item) => {
+        if(!accum.includes(item.collectionRound)) {
+          accum.push(item.collectionRound)
+        }
+        return accum
+      }, []).sort()
     }
   },
   watch: {
@@ -121,7 +173,7 @@ export default {
     }
   },
   created () {
-    
+     this.fetchVariableGroups()
   }
 }
 </script>
@@ -141,5 +193,10 @@ li {
 }
 a {
   color: #42b983;
+}
+
+td, th{
+  border: 1px solid black;
+  padding: 1rem;
 }
 </style>
