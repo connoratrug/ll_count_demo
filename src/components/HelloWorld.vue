@@ -20,24 +20,29 @@
           <label for="ugli">UGLI</label><input type="checkbox" name="ugli" v-model="ugli" id="dagx"/>
       </form>
     </div>
+
+    <h2>subsections</h2>
+    <select v-model="selectedSubSection">
+      <option v-for="subSection in subSections" :key="subSection.subsection_id" :value="subSection.subsection_id" >{{subSection.name}}</option>
+    </select>
     <div>
-      <h2>Number of assessments: {{numberOfParticipants}}</h2>
-      {{query}}
+      <h2>variable counts</h2>
+      <table>
+        <tr><th></th><th v-for="round in rounds" :key="round">{{round}}</th></tr>
+        <tr v-for="variable in countsPerVariable" :key="variable.name">
+          <th>{{variable.name}}</th>
+          <td v-for="round in rounds" :key="round">{{variable.countsPerRound[round]}}</td>
+        </tr>
+      </table>
     </div>
-    <h2>variable counts ({{variableIds}})</h2>
-    <table>
-      <tr><th></th><th v-for="round in rounds" :key="round">{{round}}</th></tr>
-      <tr v-for="variable in countsPerVariable" :key="variable.name">
-        <th>{{variable.name}}</th>
-        <td v-for="round in rounds" :key="round">{{variable.countsPerRound[round]}}</td>
-      </tr>
-    </table>
   </div>
 </template>
 
 <script>
-const participant_groups = 'lifelines_aaaac2sufodaknv2bzvip3qaai'
-const variabele = 'lifelines_aaaac2suggtn2nv2bzvip3qaaq'
+const participantGroupsEntityTypeId = 'lifelines_aaaac2sufodaknv2bzvip3qaai'
+const variableEntityTypeId = 'lifelines_aaaac2suggtn2nv2bzvip3qaaq'
+const subSectionEntityTypeId = 'lifelines_aaaac2suge5kmnv2bzvip3qaai'
+const variableTreeEntityTypeId = 'lifelines_aaaac2sugltc4nv2bzvip3qaay'
 
 export default {
   name: 'HelloWorld',
@@ -59,14 +64,17 @@ export default {
       dagx: false,
       myst: false,
       ugli: false,
-      numberOfParticipants: 0,
-      variableIds: [10393, 1],
+      subSections: [],
+      selectedSubSection: null,
       groupIds: [],
       countsPerVariable: [],
       rounds: []
     }
   },
   computed: {
+    qParam () {
+      return this.query ? `;${this.query}` : ''
+    },
     query () {
       const queryParts = []
       const ageGroups = []
@@ -121,21 +129,26 @@ export default {
     }
   },
   methods: {
-    fetchNumberOfPartipants () {
-      const qParam = this.query ? `&q=${this.query}` : ''
-      fetch(`http://localhost:8080/api/v2/${participant_groups}?molgenis-token=test${qParam}&num=10000`)
-        .then(it => it.json())
-        .then(it => this.numberOfParticipants = it.items.map(it => it.count).reduce((sum, item) => item + sum, 0))
+    async fetchSubSections () {
+      const response = await fetch(`http://localhost:8080/api/v2/${subSectionEntityTypeId}?molgenis-token=test`)
+      const subSectionsJson = await response.json()
+      this.subSections = subSectionsJson.items
+      this.selectedSubSection = this.subSections[0].subsection_id
     },
     async fetchVariableGroups () {
-      const response = await fetch(`http://localhost:8080/api/v2/${variabele}?q=variabele_id=in=(${this.variableIds.join(',')})&attrs=groups,name&molgenis-token=test`)
+      const response = await fetch(`http://localhost:8080/api/v2/${variableTreeEntityTypeId}?q=subsection_id==${this.selectedSubSection}&attrs=variable_id(groups,name)&molgenis-token=test`)
       const variableJson = await response.json()
-      const variables = variableJson.items.map(variable => ({name: variable.name, groupIds: variable.groups.map(group => group.variable_group_id)}))
+      const variables = variableJson.items
+        .map(item => item.variable_id)
+        .map(variable => ({
+          name: variable.name, 
+          groupIds: variable.groups.map(group => group.variable_group_id)
+        }))
       const allGroupIds = variables.flatMap(variable => variable.groupIds)
 
       this.groupIds = allGroupIds;
       
-      const participantsResponse = await fetch(`http://localhost:8080/api/v2/${participant_groups}?molgenis-token=test&q=variable_group_id=in=(${allGroupIds.join(',')})&num=10000&attrs=~id,count,variable_group_id(~id,assessment_id(abbreviation))`)
+      const participantsResponse = await fetch(`http://localhost:8080/api/v2/${participantGroupsEntityTypeId}?molgenis-token=test&q=variable_group_id=in=(${allGroupIds.join(',')})${this.qParam}&num=10000&attrs=~id,count,variable_group_id(~id,assessment_id(abbreviation))`)
       const assessments = await participantsResponse.json()
       const counts = assessments.items.map(it => ({
           count: it.count, 
@@ -168,12 +181,17 @@ export default {
     }
   },
   watch: {
+    selectedSubSection: function (val) {
+      if (val !== null) {
+        this.fetchVariableGroups()
+      }
+    },
     query: function () {
-      this.fetchNumberOfPartipants()
+      this.fetchVariableGroups()
     }
   },
   created () {
-     this.fetchVariableGroups()
+     this.fetchSubSections()
   }
 }
 </script>
